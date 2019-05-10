@@ -5,3 +5,7 @@ install:
   - pip install brotli
 script:
   - ./test.sh
+addons:
+  apt:
+    packages:
+      - realpath
