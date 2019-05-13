@@ -5,6 +5,8 @@
 # This source code is licensed under the MIT license found in the
 # LICENSE file in the root directory of this source tree.
 
+# Encoding/decoding of individual nodes in the AST using probability tables.
+
 import collections
 import doctest
 import io
@@ -248,7 +250,8 @@ class ModelEncoder(object):
       assert type(m) is model.IndexedSymbolModel
       assert model.is_indexed_type(ty)
       # These are enumerable
-      for i, sym in enumerate(m.symbols):
+      for _, sym in enumerate(m.symbols):
+        # Encode the probability for all symbols (even symbols that do not actually appear in the tree).
         code_length = m.symbol_to_code.get(sym)
         length = code_length and code_length[1] or 0
         assert length < 256
@@ -269,11 +272,9 @@ class ModelEncoder(object):
       self.out.write(struct.pack('!l', sym))
     elif ty == idl.TY_UNSIGNED_LONG:
       self.out.write(struct.pack('!L', sym))
-    elif ty == idl.TY_BOOLEAN:
-      self.out.write(int(sym).to_bytes(1, byteorder='big'))
     elif type(ty) is idl.TyFrozenArray:
       self.encode_symbol(ty.element_ty, sym)
-    elif type(ty) is idl.Alt and ty.ty_set == set([idl.TyNone(), idl.TY_STRING]):
+    elif type(ty) is idl.Alt and ty.ty_set == set([idl.TyNone(), idl.TY_STRING]): # FIXME: Can this happen?
       if sym == idl.TyNone():
         bits.write_varint(self.out, 0)
       else:
@@ -464,6 +465,8 @@ class TreeEncoder(ast.AstVisitor):
     super().__init__(types)
     self.tables = tables
     self.out = bits.BitsIO(out)
+    # The stack of types of fields we are visiting.
+    # (lists have a special type `(parent-type, 'list-length')`)
     self.field = []
     self.log = []
 
@@ -479,7 +482,7 @@ class TreeEncoder(ast.AstVisitor):
       # FIXME: When the serialized root is not a struct, insinuate a starting model for it.
       pass
     else:
-      self._write(self.field[-1], actual_ty)
+      self._write(self.field[-1], actual_ty) # As `field` is a stack, `field[-1]` is the parent type.
     super().visit_struct(declared_ty, actual_ty, obj)
 
   def visit_field(self, struct_ty, obj, i, attr):
@@ -495,6 +498,7 @@ class TreeEncoder(ast.AstVisitor):
 
   def visit_primitive(self, ty, value):
     if ty is idl.TY_TYPE:
+      # Skip the type itself.
       return
     if value is None:
       value = idl.TyNone()
